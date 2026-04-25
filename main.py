@@ -1,9 +1,23 @@
+import json
+import os
+import sys
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import json
+from dotenv import load_dotenv
+
+load_dotenv()
+
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print(
+        "\n  ERROR: ANTHROPIC_API_KEY is not set.\n"
+        "  Create a .env file (copy .env.example) and add your key from https://console.anthropic.com\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 from agent import SkillAssessmentAgent
 from utils import extract_text_from_pdf
@@ -33,6 +47,15 @@ class ChatRequest(BaseModel):
 @app.get("/")
 async def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok",
+        "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "active_sessions": len(agent.sessions),
+    }
 
 
 @app.post("/api/start")

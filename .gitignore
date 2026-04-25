@@ -8,3 +8,6 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+# Personal presentation notes — do not share
+PRESENTATION.md

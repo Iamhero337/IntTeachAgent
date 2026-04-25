@@ -193,6 +193,10 @@ class SkillAssessmentAgent:
         session["messages"].append({"role": "user", "content": user_message})
 
         full_response = ""
+        visible_buffer = ""
+        plan_started = False
+        MARKER = "[PLAN_START]"
+
         async with self.client.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=2048,
@@ -201,11 +205,33 @@ class SkillAssessmentAgent:
         ) as stream:
             async for text in stream.text_stream:
                 full_response += text
-                yield {"type": "text", "content": text}
+
+                if plan_started:
+                    continue
+
+                visible_buffer += text
+
+                if MARKER in visible_buffer:
+                    idx = visible_buffer.index(MARKER)
+                    pre = visible_buffer[:idx].rstrip()
+                    if pre:
+                        yield {"type": "text", "content": pre}
+                    plan_started = True
+                    visible_buffer = ""
+                    yield {"type": "generating_plan"}
+                    continue
+
+                if len(visible_buffer) > len(MARKER):
+                    emit = visible_buffer[: -len(MARKER)]
+                    visible_buffer = visible_buffer[-len(MARKER):]
+                    yield {"type": "text", "content": emit}
+
+        if not plan_started and visible_buffer:
+            yield {"type": "text", "content": visible_buffer}
 
         session["messages"].append({"role": "assistant", "content": full_response})
 
-        if "[PLAN_START]" in full_response and "[PLAN_END]" in full_response:
+        if MARKER in full_response and "[PLAN_END]" in full_response:
             plan = self._extract_plan(full_response)
             if plan:
                 session["learning_plan"] = plan
@@ -247,11 +273,12 @@ class SkillAssessmentAgent:
         if not match:
             return None
         json_text = match.group(1).strip()
+        json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
+        json_text = re.sub(r"\s*```$", "", json_text).strip()
         try:
             return json.loads(json_text)
         except json.JSONDecodeError:
-            json_text = re.sub(r",\s*}", "}", json_text)
-            json_text = re.sub(r",\s*]", "]", json_text)
+            json_text = re.sub(r",\s*([}\]])", r"\1", json_text)
             try:
                 return json.loads(json_text)
             except Exception:

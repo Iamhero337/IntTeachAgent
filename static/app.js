@@ -205,7 +205,8 @@ function scrollToBottom() {
 }
 
 function escapeHtml(text) {
-  return text
+  if (text == null) return '';
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -273,7 +274,12 @@ async function sendMessage() {
             scrollToBottom();
           }
 
+          if (chunk.type === 'generating_plan') {
+            showGeneratingPlanIndicator();
+          }
+
           if (chunk.type === 'plan') {
+            removeGeneratingPlanIndicator();
             planData = chunk.content;
             showPlanReadyBanner();
             updateSidebarScores(planData);
@@ -296,6 +302,25 @@ async function sendMessage() {
   }
 }
 
+function showGeneratingPlanIndicator() {
+  if (document.getElementById('gen-plan-indicator')) return;
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.id = 'gen-plan-indicator';
+  div.className = 'gen-plan-indicator';
+  div.innerHTML = `
+    <div class="spinner-small"></div>
+    <span>Building your personalised learning plan…</span>
+  `;
+  msgs.appendChild(div);
+  scrollToBottom();
+}
+
+function removeGeneratingPlanIndicator() {
+  const el = document.getElementById('gen-plan-indicator');
+  if (el) el.remove();
+}
+
 function showPlanReadyBanner() {
   const msgs = document.getElementById('messages');
   if (document.getElementById('plan-banner')) return;
@@ -304,7 +329,7 @@ function showPlanReadyBanner() {
   banner.id = 'plan-banner';
   banner.className = 'plan-ready-banner';
   banner.innerHTML = `
-    <p>Assessment complete! Your personalised learning plan is ready.</p>
+    <p>✨ Assessment complete — your personalised learning plan is ready.</p>
     <button id="view-plan-btn" onclick="viewPlan()">View Learning Plan →</button>
   `;
   msgs.appendChild(banner);
@@ -349,9 +374,13 @@ function renderResults(plan) {
   const header = document.createElement('div');
   header.className = 'results-header';
   header.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div class="results-toolbar no-print">
       <button class="btn-back" onclick="backToChat()">← Back to Chat</button>
-      <button class="btn-back" onclick="backToSetup()">New Assessment</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-back" onclick="downloadPlan()" title="Download as JSON">⬇ Download</button>
+        <button class="btn-back" onclick="window.print()" title="Print or save as PDF">🖨 Print</button>
+        <button class="btn-back" onclick="backToSetup()">New Assessment</button>
+      </div>
     </div>
     <h2>Your Learning Plan</h2>
     <p>${escapeHtml(plan.candidate_name || 'Candidate')} — ${escapeHtml(plan.role || '')}</p>
@@ -543,6 +572,27 @@ function toggleCard(header) {
   const chevron = header.querySelector('.chevron');
   body.classList.toggle('collapsed');
   chevron.textContent = body.classList.contains('collapsed') ? '▼' : '▲';
+}
+
+/* ── Export ──────────────────────────────────────────────────────────── */
+function downloadPlan() {
+  if (!planData) return;
+  const blob = new Blob([JSON.stringify(planData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeName = (planData.candidate_name || 'candidate').replace(/\s+/g, '_').toLowerCase();
+  a.href = url;
+  a.download = `learning_plan_${safeName}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Plan downloaded', 'success');
+}
+
+/* ── Mobile sidebar toggle ──────────────────────────────────────────── */
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
 }
 
 /* ── Counter animation ───────────────────────────────────────────────── */

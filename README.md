@@ -16,6 +16,7 @@ Built for [Catalyst Hackathon — Deccan AI](https://deccan.ai)
 | 2 | Agent extracts required skills and candidate profile |
 | 3 | Conversational interview — targeted questions per skill |
 | 4 | Visual learning plan: skill scores, gap cards, curated resources, practice projects |
+| 5 | Download the plan as JSON or print/save as PDF |
 
 ---
 
