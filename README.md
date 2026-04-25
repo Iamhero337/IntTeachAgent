@@ -73,7 +73,7 @@ Each required skill is assessed through natural conversation:
 
 ```bash
 # 1. Clone
-git clone https://github.com/<your-username>/IntTeachAgent.git
+git clone https://github.com/iamhero337/IntTeachAgent.git
 cd IntTeachAgent
 
 # 2. Create virtual environment
