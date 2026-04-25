@@ -100,6 +100,35 @@ async def chat_stream(request: ChatRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@app.post("/api/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    try:
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+        from google.genai import types
+        from agent import _client, FAST_MODEL
+        mime = audio.content_type or "audio/webm"
+        response = await _client.aio.models.generate_content(
+            model=FAST_MODEL,
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime),
+                "Transcribe this audio verbatim. Output only the transcript — no preamble, no explanation, no quotes.",
+            ],
+            config=types.GenerateContentConfig(
+                max_output_tokens=2000,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        text = (response.text or "").strip()
+        return {"text": text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        code, friendly = _friendly_error(e)
+        raise HTTPException(status_code=code, detail=friendly)
+
+
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     if not (file.filename or "").lower().endswith(".pdf"):

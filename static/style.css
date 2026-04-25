@@ -434,6 +434,12 @@ header {
   border-color: var(--red);
   animation: micPulse 1.2s ease-in-out infinite;
 }
+#mic-btn.transcribing {
+  background: var(--amber);
+  color: #fff;
+  border-color: var(--amber);
+  cursor: wait;
+}
 @keyframes micPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
   50%      { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }

@@ -20,9 +20,12 @@ function resetTurn() {
   };
 }
 
-/* ── Voice input (Web Speech API) ──────────────────────────────────────── */
-let recognition = null;
-let isListening = false;
+/* ── Voice input (MediaRecorder + backend Gemini transcription) ────────── */
+let mediaRecorder = null;
+let audioChunks   = [];
+let recordStream  = null;
+let isListening   = false;
+let isTranscribing = false;
 
 /* ── Screen helpers ──────────────────────────────────────────────────── */
 function showScreen(id) {
@@ -115,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  /* Initialise voice recognition (if supported) */
+  /* Voice input check */
   initVoiceRecognition();
 });
 
@@ -138,62 +141,107 @@ function updateIntegrityPanel() {
   document.getElementById('int-tabs').classList.toggle('flagged', integrity.total.tabSwitches > 0);
 }
 
-/* ── Voice input ─────────────────────────────────────────────────────── */
+/* ── Voice input (records audio, backend transcribes via Gemini) ───── */
 function initVoiceRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const micBtn = document.getElementById('mic-btn');
-  if (!SR) {
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
     micBtn.disabled = true;
-    micBtn.title = 'Voice input not supported in this browser (try Chrome or Edge)';
+    micBtn.title = 'Voice input not supported in this browser';
     micBtn.style.opacity = '0.4';
-    return;
   }
-  recognition = new SR();
-  recognition.continuous     = true;
-  recognition.interimResults = true;
-  recognition.lang           = 'en-US';
-
-  let finalTranscript = '';
-
-  recognition.onstart = () => {
-    isListening = true;
-    micBtn.classList.add('listening');
-    finalTranscript = document.getElementById('user-input').value;
-    if (finalTranscript && !finalTranscript.endsWith(' ')) finalTranscript += ' ';
-  };
-
-  recognition.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalTranscript += t + ' ';
-      else interim += t;
-    }
-    const ta = document.getElementById('user-input');
-    ta.value = finalTranscript + interim;
-    ta.dispatchEvent(new Event('input'));
-    integrity.turn.voiceUsed = true;
-  };
-
-  recognition.onerror = (e) => {
-    if (e.error === 'no-speech') return;
-    toast(`Mic error: ${e.error}`, 'error');
-    stopMic();
-  };
-
-  recognition.onend = () => stopMic();
 }
 
-function toggleMic() {
-  if (!recognition) return;
-  if (isListening) stopMic();
-  else { try { recognition.start(); } catch {} }
+async function toggleMic() {
+  if (isTranscribing) return;
+  if (isListening) {
+    stopMic();
+    return;
+  }
+
+  try {
+    recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    toast('Microphone access denied. Allow mic in browser settings.', 'error');
+    return;
+  }
+
+  /* Pick a MIME the browser can record */
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+  const mime = candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+  try {
+    mediaRecorder = mime ? new MediaRecorder(recordStream, { mimeType: mime }) : new MediaRecorder(recordStream);
+  } catch {
+    toast('Could not start recorder', 'error');
+    recordStream.getTracks().forEach(t => t.stop());
+    return;
+  }
+
+  audioChunks = [];
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = handleRecordingStop;
+
+  mediaRecorder.start();
+  isListening = true;
+  document.getElementById('mic-btn').classList.add('listening');
+  document.getElementById('mic-btn').textContent = '⏹';
+  document.getElementById('mic-btn').title = 'Click to stop and transcribe';
 }
 
 function stopMic() {
+  if (!mediaRecorder) return;
+  if (mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
   isListening = false;
-  document.getElementById('mic-btn').classList.remove('listening');
-  if (recognition) try { recognition.stop(); } catch {}
+}
+
+async function handleRecordingStop() {
+  recordStream && recordStream.getTracks().forEach(t => t.stop());
+
+  const micBtn = document.getElementById('mic-btn');
+  micBtn.classList.remove('listening');
+  micBtn.classList.add('transcribing');
+  micBtn.textContent = '…';
+  micBtn.title = 'Transcribing…';
+  isTranscribing = true;
+
+  const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+  if (blob.size < 500) {
+    toast('Recording too short — try again', 'error');
+    resetMicButton();
+    return;
+  }
+
+  try {
+    const fd = new FormData();
+    fd.append('audio', blob, 'voice.webm');
+    const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast(err.detail || 'Transcription failed', 'error');
+    } else {
+      const data = await res.json();
+      const ta = document.getElementById('user-input');
+      const sep = ta.value && !ta.value.endsWith(' ') ? ' ' : '';
+      ta.value = ta.value + sep + (data.text || '');
+      ta.dispatchEvent(new Event('input'));
+      ta.focus();
+      integrity.turn.voiceUsed = true;
+    }
+  } catch {
+    toast('Network error during transcription', 'error');
+  } finally {
+    resetMicButton();
+  }
+}
+
+function resetMicButton() {
+  isTranscribing = false;
+  const micBtn = document.getElementById('mic-btn');
+  micBtn.classList.remove('listening', 'transcribing');
+  micBtn.textContent = '🎤';
+  micBtn.title = 'Voice input (records, then transcribes via Gemini)';
 }
 
 /* ── Start Assessment ─────────────────────────────────────────────────── */
