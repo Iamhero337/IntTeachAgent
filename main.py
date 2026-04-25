@@ -59,6 +59,19 @@ async def health():
     }
 
 
+def _friendly_error(e: Exception) -> tuple[int, str]:
+    msg = str(e)
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+        return 429, (
+            "The Gemini free tier daily quota has been hit. "
+            "Either wait for the daily reset or enable billing in Google AI Studio "
+            "(very cheap — pennies per assessment)."
+        )
+    if "401" in msg or "API key" in msg.lower() or "permission" in msg.lower():
+        return 401, "Invalid or missing GEMINI_API_KEY. Check your environment variable."
+    return 500, msg
+
+
 @app.post("/api/start")
 async def start_session(request: StartRequest):
     if not request.jd_text.strip() or not request.resume_text.strip():
@@ -67,7 +80,8 @@ async def start_session(request: StartRequest):
         result = await agent.start_session(request.jd_text, request.resume_text)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        code, friendly = _friendly_error(e)
+        raise HTTPException(status_code=code, detail=friendly)
 
 
 @app.post("/api/chat")
@@ -79,7 +93,8 @@ async def chat_stream(request: ChatRequest):
             ):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            _, friendly = _friendly_error(e)
+            yield f"data: {json.dumps({'type': 'error', 'content': friendly})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

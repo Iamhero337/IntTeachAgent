@@ -12,8 +12,8 @@ load_dotenv()
 
 _client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
-FAST_MODEL = "gemini-2.5-flash"
-CHAT_MODEL = "gemini-2.5-flash"
+FAST_MODEL = "gemini-2.5-flash-lite"
+CHAT_MODEL = "gemini-2.5-flash-lite"
 
 EXTRACTION_SYSTEM = (
     "You are a document analyzer. Extract structured data from job descriptions and resumes. "
