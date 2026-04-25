@@ -1,0 +1,42 @@
+Arjun Mehta
+Bangalore, India | arjun.mehta@email.com | github.com/arjunmehta | linkedin.com/in/arjunmehta
+
+SUMMARY
+Software engineer with 3 years of experience building web applications, primarily focused on Python backend development. Comfortable working across the stack but strongest on the backend. Looking to grow into senior-level ownership of complex systems.
+
+WORK EXPERIENCE
+
+Software Engineer – Groww (Fintech), Bangalore
+Jan 2022 – Present (2.5 years)
+
+- Built and maintained several REST APIs in Python/Flask serving ~50K daily active users
+- Wrote database queries and managed PostgreSQL schemas for portfolio and transaction data; added indexes that cut query latency by 40%
+- Used Docker to containerise our Flask services and wrote Docker Compose files for local development
+- Migrated a portion of our data pipeline from synchronous to async processing, learning asyncio in the process
+- Contributed to a React dashboard for internal analysts; mostly bug fixes and small feature additions
+- All code reviewed via GitHub PRs; we use GitHub Actions for CI
+
+Junior Developer – Freelance, Remote
+Jun 2021 – Dec 2021 (6 months)
+- Built 3 client websites using React and a Node.js/Express backend
+- Deployed on a shared VPS using basic Docker setups
+
+EDUCATION
+B.Tech, Computer Science — VIT University, Vellore (2021)
+
+SKILLS
+Languages:  Python (3 yrs), JavaScript/TypeScript (1.5 yrs), SQL (3 yrs)
+Frameworks: Flask (2.5 yrs), FastAPI (6 months, personal projects), React (1.5 yrs)
+Databases:  PostgreSQL (3 yrs), basic MySQL
+DevOps:     Docker, Docker Compose, GitHub Actions (basic pipelines)
+Cloud:      Deployed personal projects on AWS EC2 and S3 — no production AWS experience
+Testing:    pytest (unit tests), some integration tests
+
+PROJECTS
+OpenBudget — Personal finance tracker (FastAPI + React + PostgreSQL)
+- Full-stack app with JWT auth, budgeting API, and a React dashboard
+- Deployed on EC2 behind Nginx; Dockerised with a Compose file
+- github.com/arjunmehta/openbudget
+
+CERTIFICATIONS
+- AWS Cloud Practitioner (2023) — foundational, no hands-on Solutions Architect

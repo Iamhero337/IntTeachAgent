@@ -1,0 +1,270 @@
+import anthropic
+import uuid
+import json
+import re
+from typing import AsyncGenerator, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+EXTRACTION_SYSTEM = (
+    "You are a document analyzer. Extract structured data from job descriptions and resumes. "
+    "Always output valid JSON only — no markdown, no explanation."
+)
+
+EXTRACTION_USER_TEMPLATE = """Analyze the job description and resume below.
+
+JOB DESCRIPTION:
+{jd_text}
+
+RESUME:
+{resume_text}
+
+Output ONLY valid JSON (no other text, no code fences):
+{{
+  "required_skills": [
+    {{"skill": "Python", "importance": "critical", "years_expected": 3}},
+    {{"skill": "Docker", "importance": "high", "years_expected": 2}}
+  ],
+  "candidate_skills": [
+    {{"skill": "Python", "years": 3, "context": "web development"}},
+    {{"skill": "Docker", "years": 1, "context": "basic usage"}}
+  ],
+  "candidate_name": "Full name or Candidate",
+  "candidate_summary": "Two-sentence professional summary of candidate background.",
+  "role_title": "Job title from the JD"
+}}
+
+Rules:
+- required_skills: technical skills, tools, frameworks, databases, cloud. Max 10, ordered by importance.
+- candidate_skills: only skills explicitly mentioned in the resume.
+- years_expected / years: 0 if not stated."""
+
+ASSESSMENT_SYSTEM_TEMPLATE = """You are SkillSense, an expert technical assessor and career coach. \
+You are conducting a focused conversational interview to measure a candidate's REAL proficiency.
+
+## Role: {role_title}
+
+## Skills to Assess ({skill_count} total, in order of importance)
+{required_skills_str}
+
+## Candidate: {candidate_name}
+{candidate_summary}
+
+## What They Claim
+{candidate_skills_str}
+
+## Interview Rules
+1. Ask ONE question per message — never bundle multiple questions.
+2. Probe real experience and practical understanding, not definitions.
+3. After receiving an answer, ask ONE targeted follow-up if needed, then move on.
+4. Be warm, professional, and encouraging throughout.
+5. Work through ALL {skill_count} skills. Do not skip any.
+6. Internal proficiency scale (never share scores mid-interview):
+   1=Aware only | 2=Beginner | 3=Intermediate | 4=Advanced | 5=Expert
+
+## Effective Question Patterns
+- "Walk me through a real project where you used [skill] — what was the trickiest part?"
+- "What's something about [skill] that catches most beginners off guard?"
+- "How do you handle [common challenge] when working with [skill]?"
+- "If you had to explain [key concept] to a junior dev, how would you approach it?"
+
+## After ALL {skill_count} Skills Are Assessed
+Wrap up naturally, then output EXACTLY this structure (valid JSON between the markers):
+
+---
+Thank you, {candidate_name}! I've completed the assessment. Here's what I found:
+
+[2-3 sentence honest summary of their profile, strengths, and biggest opportunity areas]
+
+[PLAN_START]
+{{
+  "candidate_name": "{candidate_name}",
+  "role": "{role_title}",
+  "overall_fit_percentage": <realistic 0-100>,
+  "skill_scores": {{
+    "<skill>": <1-5>
+  }},
+  "strengths": ["<skills scored 4-5>"],
+  "gaps": ["<skills scored 1-3>"],
+  "learning_plan": [
+    {{
+      "skill": "<skill name>",
+      "current_level": <1-5>,
+      "target_level": <minimum needed>,
+      "priority": "critical|high|medium",
+      "time_estimate_weeks": <realistic integer>,
+      "learning_path": "<specific step-by-step approach in 2-3 sentences>",
+      "resources": [
+        {{
+          "title": "<real resource name>",
+          "type": "course|book|docs|tutorial|project|video",
+          "provider": "<Coursera/O'Reilly/YouTube/official/etc>",
+          "estimated_hours": <integer>,
+          "url_hint": "<search term or known URL>",
+          "why_recommended": "<why this fits this specific candidate>"
+        }}
+      ],
+      "adjacent_skills_unlocked": ["<skill easier to learn after this one>"],
+      "practice_project": "<specific mini-project to build for hands-on practice>"
+    }}
+  ],
+  "learning_timeline": "<honest X weeks/months to be job-ready>",
+  "priority_focus": "<the single most impactful area to tackle first>",
+  "encouragement": "<genuine, specific motivating note for this person>"
+}}
+[PLAN_END]"""
+
+
+class SkillAssessmentAgent:
+    def __init__(self) -> None:
+        self.client = anthropic.AsyncAnthropic()
+        self.sessions: dict = {}
+
+    async def start_session(self, jd_text: str, resume_text: str) -> dict:
+        extraction = await self._extract_info(jd_text, resume_text)
+
+        required_skills = extraction.get("required_skills", [])[:10]
+        candidate_skills = extraction.get("candidate_skills", [])
+        candidate_name = extraction.get("candidate_name", "Candidate")
+        candidate_summary = extraction.get("candidate_summary", "Background not available.")
+        role_title = extraction.get("role_title", "the position")
+
+        required_skills_str = "\n".join(
+            f"- {s['skill']} ({s.get('importance', 'required')})" for s in required_skills
+        )
+        candidate_skills_str = (
+            "\n".join(
+                f"- {s['skill']}: {s.get('years', '?')} yrs — {s.get('context', '')}"
+                for s in candidate_skills
+            )
+            or "No specific skills listed in resume"
+        )
+
+        system_prompt = ASSESSMENT_SYSTEM_TEMPLATE.format(
+            role_title=role_title,
+            skill_count=len(required_skills),
+            required_skills_str=required_skills_str,
+            candidate_name=candidate_name,
+            candidate_summary=candidate_summary,
+            candidate_skills_str=candidate_skills_str,
+        )
+
+        init_response = await self.client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Please begin the assessment."}],
+        )
+        initial_message = init_response.content[0].text
+
+        session_id = str(uuid.uuid4())
+        self.sessions[session_id] = {
+            "system_prompt": system_prompt,
+            "messages": [
+                {"role": "user", "content": "Please begin the assessment."},
+                {"role": "assistant", "content": initial_message},
+            ],
+            "required_skills": required_skills,
+            "candidate_info": extraction,
+            "phase": "assessment",
+            "learning_plan": None,
+        }
+
+        return {
+            "session_id": session_id,
+            "initial_message": initial_message,
+            "required_skills": required_skills,
+            "candidate_info": {
+                "name": candidate_name,
+                "role": role_title,
+                "summary": candidate_summary,
+            },
+        }
+
+    async def chat_stream(
+        self, session_id: str, user_message: str
+    ) -> AsyncGenerator[dict, None]:
+        if session_id not in self.sessions:
+            yield {"type": "error", "content": "Session not found"}
+            return
+
+        session = self.sessions[session_id]
+        session["messages"].append({"role": "user", "content": user_message})
+
+        full_response = ""
+        async with self.client.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=session["system_prompt"],
+            messages=session["messages"],
+        ) as stream:
+            async for text in stream.text_stream:
+                full_response += text
+                yield {"type": "text", "content": text}
+
+        session["messages"].append({"role": "assistant", "content": full_response})
+
+        if "[PLAN_START]" in full_response and "[PLAN_END]" in full_response:
+            plan = self._extract_plan(full_response)
+            if plan:
+                session["learning_plan"] = plan
+                session["phase"] = "complete"
+                yield {"type": "plan", "content": plan}
+
+    async def _extract_info(self, jd_text: str, resume_text: str) -> dict:
+        prompt = EXTRACTION_USER_TEMPLATE.format(
+            jd_text=jd_text[:4000], resume_text=resume_text[:4000]
+        )
+        response = await self.client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=EXTRACTION_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except Exception:
+                    pass
+        return {
+            "required_skills": [{"skill": "General Technical Skills", "importance": "required"}],
+            "candidate_skills": [],
+            "candidate_name": "Candidate",
+            "candidate_summary": "Candidate background could not be parsed.",
+            "role_title": "the position",
+        }
+
+    def _extract_plan(self, text: str) -> Optional[dict]:
+        match = re.search(r"\[PLAN_START\](.*?)\[PLAN_END\]", text, re.DOTALL)
+        if not match:
+            return None
+        json_text = match.group(1).strip()
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError:
+            json_text = re.sub(r",\s*}", "}", json_text)
+            json_text = re.sub(r",\s*]", "]", json_text)
+            try:
+                return json.loads(json_text)
+            except Exception:
+                return None
+
+    def get_session(self, session_id: str) -> Optional[dict]:
+        session = self.sessions.get(session_id)
+        if not session:
+            return None
+        return {
+            "session_id": session_id,
+            "phase": session["phase"],
+            "required_skills": session["required_skills"],
+            "learning_plan": session["learning_plan"],
+            "message_count": len(session["messages"]),
+        }

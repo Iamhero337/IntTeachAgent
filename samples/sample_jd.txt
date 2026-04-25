@@ -1,0 +1,31 @@
+Senior Full-Stack Engineer – FinTech Platform
+Company: PayEdge Technologies
+Location: Remote (India / APAC)
+
+About the Role
+We are looking for a Senior Full-Stack Engineer to join our core platform team. You will own end-to-end delivery of new features across our payments infrastructure and customer-facing dashboard.
+
+Responsibilities
+- Design, build, and maintain Python (FastAPI) backend services handling millions of transactions per day
+- Build responsive React/TypeScript frontends for merchant dashboards
+- Write and optimise SQL queries against PostgreSQL databases
+- Containerise services using Docker and orchestrate with Kubernetes
+- Deploy and monitor workloads on AWS (EC2, RDS, S3, Lambda)
+- Implement and maintain REST APIs consumed by mobile and third-party clients
+- Collaborate with the security team to enforce OWASP best practices
+- Participate in on-call rotations and incident response
+
+Required Skills
+- Python (4+ years) — FastAPI or Django, async programming, testing with pytest
+- React + TypeScript (2+ years) — hooks, state management, component design
+- PostgreSQL (2+ years) — complex queries, indexing, performance tuning
+- Docker (2+ years) — multi-stage builds, Docker Compose, container security
+- AWS (1+ year) — core services, IAM, deployment pipelines
+- REST API design — versioning, pagination, error handling, OpenAPI/Swagger
+- Git — feature branches, PR workflow, code review
+- Basic understanding of CI/CD (GitHub Actions or similar)
+
+Nice to Have
+- Redis for caching and message queuing
+- Experience with Celery or similar task queues
+- Familiarity with Kafka or event-driven architectures

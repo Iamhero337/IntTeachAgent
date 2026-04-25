@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkillSense – AI Skill Assessment Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <span>SkillSense</span>
+  </div>
+  <span class="tagline">AI Skill Assessment &amp; Learning Plan Agent</span>
+</header>
+
+<!-- ── Loader overlay ─────────────────────────────────────────────────── -->
+<div id="loader">
+  <div class="spinner"></div>
+  <p>Analysing documents…</p>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     SETUP SCREEN
+═══════════════════════════════════════════════════════════════════════ -->
+<div id="setup-screen" class="screen active">
+
+  <div class="setup-hero">
+    <h1>Know What You Really Know</h1>
+    <p>Paste a Job Description and your Resume. We'll have a real conversation to find the gaps — then build your plan.</p>
+  </div>
+
+  <div class="setup-grid">
+    <!-- JD -->
+    <div class="input-card">
+      <label>
+        <span class="icon">📋</span> Job Description
+      </label>
+      <textarea
+        id="jd-input"
+        placeholder="Paste the full job description here — requirements, responsibilities, tech stack…"
+      ></textarea>
+    </div>
+
+    <!-- Resume -->
+    <div class="input-card">
+      <label>
+        <span class="icon">📄</span> Your Resume
+      </label>
+      <div class="pdf-row">
+        <button class="btn-upload" onclick="triggerPDFUpload()">📎 Upload PDF</button>
+        <span>or paste text below</span>
+      </div>
+      <input type="file" id="pdf-input" accept=".pdf" style="display:none">
+      <textarea
+        id="resume-input"
+        placeholder="Paste your resume text here — experience, skills, education, projects…"
+      ></textarea>
+    </div>
+  </div>
+
+  <div class="setup-footer">
+    <button id="start-btn" onclick="startAssessment()">
+      <span>Start Assessment</span>
+      <span>→</span>
+    </button>
+    <span style="font-size:0.78rem;color:var(--muted)">
+      The agent will ask you targeted questions about each required skill — be honest, it helps!
+    </span>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     ASSESSMENT SCREEN
+═══════════════════════════════════════════════════════════════════════ -->
+<div id="assessment-screen" class="screen">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Candidate</h3>
+      <div class="candidate-card">
+        <div class="name"  id="cand-name">—</div>
+        <div class="role"  id="cand-role">—</div>
+        <div class="summary" id="cand-summary"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Skills Being Assessed</h3>
+      <div id="skills-list"></div>
+    </div>
+
+    <div class="sidebar-section" style="margin-top:auto">
+      <button class="btn-back" onclick="backToSetup()" style="width:100%;justify-content:center">
+        ← New Assessment
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Chat panel -->
+  <div class="chat-panel">
+    <div id="messages" class="messages"></div>
+
+    <div class="input-area">
+      <textarea
+        id="user-input"
+        rows="1"
+        placeholder="Type your response… (Enter to send, Shift+Enter for newline)"
+      ></textarea>
+      <button id="send-btn" onclick="sendMessage()" title="Send (Enter)">↑</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     RESULTS SCREEN
+═══════════════════════════════════════════════════════════════════════ -->
+<div id="results-screen" class="screen">
+  <div id="results-container" class="results-container"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
