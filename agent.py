@@ -1,11 +1,19 @@
-import anthropic
+import os
 import uuid
 import json
 import re
 from typing import AsyncGenerator, Optional
+
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+
+FAST_MODEL = "gemini-2.5-flash"
+CHAT_MODEL = "gemini-2.5-flash"
 
 EXTRACTION_SYSTEM = (
     "You are a document analyzer. Extract structured data from job descriptions and resumes. "
@@ -116,9 +124,19 @@ Thank you, {candidate_name}! I've completed the assessment. Here's what I found:
 [PLAN_END]"""
 
 
+def _to_gemini_contents(messages: list[dict]) -> list[dict]:
+    """Convert Anthropic-style messages to Gemini contents format."""
+    return [
+        {
+            "role": "model" if m["role"] == "assistant" else "user",
+            "parts": [{"text": m["content"]}],
+        }
+        for m in messages
+    ]
+
+
 class SkillAssessmentAgent:
     def __init__(self) -> None:
-        self.client = anthropic.AsyncAnthropic()
         self.sessions: dict = {}
 
     async def start_session(self, jd_text: str, resume_text: str) -> dict:
@@ -150,13 +168,17 @@ class SkillAssessmentAgent:
             candidate_skills_str=candidate_skills_str,
         )
 
-        init_response = await self.client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            system=system_prompt,
-            messages=[{"role": "user", "content": "Please begin the assessment."}],
+        init_messages = [{"role": "user", "content": "Please begin the assessment."}]
+        init_response = await _client.aio.models.generate_content(
+            model=CHAT_MODEL,
+            contents=_to_gemini_contents(init_messages),
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        initial_message = init_response.content[0].text
+        initial_message = init_response.text
 
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {
@@ -197,34 +219,37 @@ class SkillAssessmentAgent:
         plan_started = False
         MARKER = "[PLAN_START]"
 
-        async with self.client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            system=session["system_prompt"],
-            messages=session["messages"],
-        ) as stream:
-            async for text in stream.text_stream:
-                full_response += text
+        async for chunk in _client.aio.models.generate_content_stream(
+            model=CHAT_MODEL,
+            contents=_to_gemini_contents(session["messages"]),
+            config=types.GenerateContentConfig(
+                system_instruction=session["system_prompt"],
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        ):
+            text = chunk.text or ""
+            full_response += text
 
-                if plan_started:
-                    continue
+            if plan_started:
+                continue
 
-                visible_buffer += text
+            visible_buffer += text
 
-                if MARKER in visible_buffer:
-                    idx = visible_buffer.index(MARKER)
-                    pre = visible_buffer[:idx].rstrip()
-                    if pre:
-                        yield {"type": "text", "content": pre}
-                    plan_started = True
-                    visible_buffer = ""
-                    yield {"type": "generating_plan"}
-                    continue
+            if MARKER in visible_buffer:
+                idx = visible_buffer.index(MARKER)
+                pre = visible_buffer[:idx].rstrip()
+                if pre:
+                    yield {"type": "text", "content": pre}
+                plan_started = True
+                visible_buffer = ""
+                yield {"type": "generating_plan"}
+                continue
 
-                if len(visible_buffer) > len(MARKER):
-                    emit = visible_buffer[: -len(MARKER)]
-                    visible_buffer = visible_buffer[-len(MARKER):]
-                    yield {"type": "text", "content": emit}
+            if len(visible_buffer) > len(MARKER):
+                emit = visible_buffer[: -len(MARKER)]
+                visible_buffer = visible_buffer[-len(MARKER):]
+                yield {"type": "text", "content": emit}
 
         if not plan_started and visible_buffer:
             yield {"type": "text", "content": visible_buffer}
@@ -242,24 +267,24 @@ class SkillAssessmentAgent:
         prompt = EXTRACTION_USER_TEMPLATE.format(
             jd_text=jd_text[:4000], resume_text=resume_text[:4000]
         )
-        response = await self.client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            system=EXTRACTION_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
+        response = await _client.aio.models.generate_content(
+            model=FAST_MODEL,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM,
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        raw = response.content[0].text.strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
+        raw = (response.text or "").strip()
+        # Robustly extract the JSON object regardless of surrounding text/fences
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end != -1:
+            raw = raw[start : end + 1]
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group())
-                except Exception:
-                    pass
+            pass
         return {
             "required_skills": [{"skill": "General Technical Skills", "importance": "required"}],
             "candidate_skills": [],

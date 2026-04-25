@@ -11,10 +11,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-if not os.environ.get("ANTHROPIC_API_KEY"):
+if not os.environ.get("GEMINI_API_KEY"):
     print(
-        "\n  ERROR: ANTHROPIC_API_KEY is not set.\n"
-        "  Create a .env file (copy .env.example) and add your key from https://console.anthropic.com\n",
+        "\n  ERROR: GEMINI_API_KEY is not set.\n"
+        "  Create a .env file (copy .env.example) and add your key from https://aistudio.google.com\n",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -53,7 +53,7 @@ async def index():
 async def health():
     return {
         "status": "ok",
-        "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "api_key_configured": bool(os.environ.get("GEMINI_API_KEY")),
         "active_sessions": len(agent.sessions),
     }
 
@@ -111,4 +111,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    reload = os.environ.get("RAILWAY_ENVIRONMENT") is None
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload)
