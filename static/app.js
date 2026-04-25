@@ -4,6 +4,26 @@ let planData   = null;
 let isSending  = false;
 let currentBotBubble = null;
 
+/* ── Integrity tracking (per-turn + cumulative) ────────────────────────── */
+const integrity = {
+  total: { pastes: 0, tabSwitches: 0, answerTimes: [] },
+  turn:  resetTurn(),
+};
+
+function resetTurn() {
+  return {
+    pasted: false,
+    tabSwitches: 0,
+    voiceUsed: false,
+    inputStartTime: null,
+    charCount: 0,
+  };
+}
+
+/* ── Voice input (Web Speech API) ──────────────────────────────────────── */
+let recognition = null;
+let isListening = false;
+
 /* ── Screen helpers ──────────────────────────────────────────────────── */
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -60,20 +80,121 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  /* Auto-grow textarea */
-  document.getElementById('user-input').addEventListener('input', function () {
+  /* Auto-grow textarea + track first input time */
+  const ta = document.getElementById('user-input');
+  ta.addEventListener('input', function () {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+    if (!integrity.turn.inputStartTime && this.value.trim().length > 0) {
+      integrity.turn.inputStartTime = Date.now();
+    }
+    integrity.turn.charCount = this.value.length;
+  });
+
+  /* Track paste */
+  ta.addEventListener('paste', () => {
+    integrity.turn.pasted = true;
+    integrity.total.pastes++;
+    updateIntegrityPanel();
+  });
+
+  /* Track tab switches (mid-answer) */
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && sessionId) {
+      integrity.turn.tabSwitches++;
+      integrity.total.tabSwitches++;
+      updateIntegrityPanel();
+    }
   });
 
   /* Enter to send (Shift+Enter = newline) */
-  document.getElementById('user-input').addEventListener('keydown', e => {
+  ta.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   });
+
+  /* Initialise voice recognition (if supported) */
+  initVoiceRecognition();
 });
+
+/* ── Integrity panel UI ─────────────────────────────────────────────── */
+function updateIntegrityPanel() {
+  const set = (id, val) => {
+    const el = document.querySelector(`#${id} .int-value`);
+    if (el) el.textContent = val;
+  };
+  set('int-pastes', integrity.total.pastes);
+  set('int-tabs',   integrity.total.tabSwitches);
+  const times = integrity.total.answerTimes;
+  if (times.length) {
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    set('int-time', `${Math.round(avg)}s`);
+  }
+
+  /* Highlight rows with non-zero values */
+  document.getElementById('int-pastes').classList.toggle('flagged', integrity.total.pastes > 0);
+  document.getElementById('int-tabs').classList.toggle('flagged', integrity.total.tabSwitches > 0);
+}
+
+/* ── Voice input ─────────────────────────────────────────────────────── */
+function initVoiceRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn = document.getElementById('mic-btn');
+  if (!SR) {
+    micBtn.disabled = true;
+    micBtn.title = 'Voice input not supported in this browser (try Chrome or Edge)';
+    micBtn.style.opacity = '0.4';
+    return;
+  }
+  recognition = new SR();
+  recognition.continuous     = true;
+  recognition.interimResults = true;
+  recognition.lang           = 'en-US';
+
+  let finalTranscript = '';
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add('listening');
+    finalTranscript = document.getElementById('user-input').value;
+    if (finalTranscript && !finalTranscript.endsWith(' ')) finalTranscript += ' ';
+  };
+
+  recognition.onresult = (event) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalTranscript += t + ' ';
+      else interim += t;
+    }
+    const ta = document.getElementById('user-input');
+    ta.value = finalTranscript + interim;
+    ta.dispatchEvent(new Event('input'));
+    integrity.turn.voiceUsed = true;
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    toast(`Mic error: ${e.error}`, 'error');
+    stopMic();
+  };
+
+  recognition.onend = () => stopMic();
+}
+
+function toggleMic() {
+  if (!recognition) return;
+  if (isListening) stopMic();
+  else { try { recognition.start(); } catch {} }
+}
+
+function stopMic() {
+  isListening = false;
+  document.getElementById('mic-btn').classList.remove('listening');
+  if (recognition) try { recognition.stop(); } catch {}
+}
 
 /* ── Start Assessment ─────────────────────────────────────────────────── */
 async function startAssessment() {
@@ -223,6 +344,24 @@ async function sendMessage() {
   const msg   = input.value.trim();
   if (!msg) return;
 
+  /* Capture integrity for THIS turn before resetting */
+  const t = integrity.turn;
+  const responseSeconds = t.inputStartTime
+    ? (Date.now() - t.inputStartTime) / 1000
+    : null;
+  if (responseSeconds != null) integrity.total.answerTimes.push(responseSeconds);
+  updateIntegrityPanel();
+
+  const integrityPayload = {
+    pasted:                t.pasted,
+    tab_switches:          t.tabSwitches,
+    voice_used:            t.voiceUsed,
+    response_time_seconds: responseSeconds,
+    char_count:            msg.length,
+  };
+  integrity.turn = resetTurn();
+
+  if (isListening) stopMic();
   input.value = '';
   input.style.height = 'auto';
   isSending = true;
@@ -235,7 +374,11 @@ async function sendMessage() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, message: msg }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        message: msg,
+        integrity: integrityPayload,
+      }),
     });
 
     if (!res.ok) {
@@ -358,6 +501,9 @@ function backToSetup() {
   sessionId = null;
   planData   = null;
   isSending  = false;
+  integrity.total = { pastes: 0, tabSwitches: 0, answerTimes: [] };
+  integrity.turn  = resetTurn();
+  updateIntegrityPanel();
   document.getElementById('messages').innerHTML = '';
   document.getElementById('skills-list').innerHTML = '';
   document.getElementById('results-container').innerHTML = '';

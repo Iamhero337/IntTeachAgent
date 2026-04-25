@@ -403,25 +403,109 @@ header {
 #user-input:focus { border-color: var(--primary); }
 #user-input::placeholder { color: var(--muted); }
 
-#send-btn {
-  background: var(--primary);
-  color: #fff;
+#send-btn, #mic-btn {
   border: none;
   border-radius: var(--radius);
   width: 44px;
   height: 44px;
   cursor: pointer;
   font-size: 18px;
-  transition: background 0.2s, transform 0.1s;
+  transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
+#send-btn { background: var(--primary); color: #fff; }
 #send-btn:hover { background: var(--primary-h); }
 #send-btn:active { transform: scale(0.95); }
 #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+#mic-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+#mic-btn:hover { border-color: var(--teal); color: var(--teal); }
+#mic-btn.listening {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+  animation: micPulse 1.2s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+  50%      { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+}
+
+/* Integrity panel */
+.integrity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.integrity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.integrity-row.flagged { color: var(--amber); }
+.integrity-row .int-icon { width: 18px; text-align: center; }
+.integrity-row .int-label { flex: 1; }
+.integrity-row .int-value { font-weight: 700; color: var(--text); }
+.integrity-row.flagged .int-value { color: var(--amber); }
+.integrity-hint {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+/* Deccan AI note */
+.deccan-note {
+  margin-top: 56px;
+  max-width: 720px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  background: linear-gradient(135deg, rgba(20,184,166,0.06), rgba(99,102,241,0.04));
+  border: 1px solid rgba(20,184,166,0.18);
+  border-radius: var(--radius-lg);
+  padding: 22px 26px;
+}
+.deccan-heart {
+  font-size: 1.6rem;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(20,184,166,0.4));
+}
+.deccan-headline {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  color: var(--teal);
+  letter-spacing: 0.01em;
+}
+.deccan-body p {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+.deccan-sign {
+  font-size: 0.85rem;
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 4px;
+}
 
 /* ── Results Screen ───────────────────────────────────────────────────── */
 #results-screen {

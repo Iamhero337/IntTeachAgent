@@ -78,6 +78,24 @@
     </span>
   </div>
 
+  <!-- A note for the team building this dream -->
+  <div class="deccan-note">
+    <div class="deccan-heart">💚</div>
+    <div class="deccan-body">
+      <div class="deccan-headline">For the team at Deccan AI</div>
+      <p>
+        I didn't build SkillSense to win a hackathon. I built it to show you the kind of
+        engineer I want to be on your team — someone who ships end-to-end, sweats the
+        details, and cares whether the product actually helps a person grow.
+      </p>
+      <p>
+        Whatever happens with the prize, I'd love to keep talking. You're solving real
+        problems, and I want in.
+      </p>
+      <div class="deccan-sign">— Md Irfan</div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════
@@ -104,6 +122,30 @@
       <div id="skills-list"></div>
     </div>
 
+    <div class="sidebar-section">
+      <h3>Integrity Signals</h3>
+      <div class="integrity-panel">
+        <div class="integrity-row" id="int-pastes">
+          <span class="int-icon">📋</span>
+          <span class="int-label">Paste events</span>
+          <span class="int-value">0</span>
+        </div>
+        <div class="integrity-row" id="int-tabs">
+          <span class="int-icon">🪟</span>
+          <span class="int-label">Tab switches</span>
+          <span class="int-value">0</span>
+        </div>
+        <div class="integrity-row" id="int-time">
+          <span class="int-icon">⏱</span>
+          <span class="int-label">Avg answer time</span>
+          <span class="int-value">—</span>
+        </div>
+        <div class="integrity-hint">
+          The agent factors these signals into scoring confidence.
+        </div>
+      </div>
+    </div>
+
     <div class="sidebar-section" style="margin-top:auto">
       <button class="btn-back" onclick="backToSetup()" style="width:100%;justify-content:center">
         ← New Assessment
@@ -120,8 +162,9 @@
       <textarea
         id="user-input"
         rows="1"
-        placeholder="Type your response… (Enter to send, Shift+Enter for newline)"
+        placeholder="Type your response… (or click 🎤 to dictate)"
       ></textarea>
+      <button id="mic-btn" onclick="toggleMic()" title="Voice input (Web Speech API)">🎤</button>
       <button id="send-btn" onclick="sendMessage()" title="Send (Enter)">↑</button>
     </div>
   </div>

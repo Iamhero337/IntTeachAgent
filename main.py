@@ -42,6 +42,7 @@ class StartRequest(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    integrity: dict | None = None
 
 
 @app.get("/")
@@ -73,7 +74,9 @@ async def start_session(request: StartRequest):
 async def chat_stream(request: ChatRequest):
     async def generate():
         try:
-            async for chunk in agent.chat_stream(request.session_id, request.message):
+            async for chunk in agent.chat_stream(
+                request.session_id, request.message, request.integrity
+            ):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"

@@ -77,6 +77,13 @@ You are conducting a focused conversational interview to measure a candidate's R
 - "How do you handle [common challenge] when working with [skill]?"
 - "If you had to explain [key concept] to a junior dev, how would you approach it?"
 
+## Integrity Signals
+Each user message may end with a hidden bracketed `[Integrity: …]` note that the candidate cannot see. When you see signals like *paste detected*, *tab switched*, *answer too fast*, or *answer length suspicious*, do NOT accuse the candidate. Instead:
+- Probe deeper with a follow-up that requires personal experience that can't be googled
+- Ask "what would you NOT do" / failure-mode questions
+- Lower your confidence when scoring that skill
+- In the final plan, factor reduced confidence into the score
+
 ## After ALL {skill_count} Skills Are Assessed
 Wrap up naturally, then output EXACTLY this structure (valid JSON between the markers):
 
@@ -205,21 +212,32 @@ class SkillAssessmentAgent:
         }
 
     async def chat_stream(
-        self, session_id: str, user_message: str
+        self,
+        session_id: str,
+        user_message: str,
+        integrity: Optional[dict] = None,
     ) -> AsyncGenerator[dict, None]:
         if session_id not in self.sessions:
             yield {"type": "error", "content": "Session not found"}
             return
 
         session = self.sessions[session_id]
-        session["messages"].append({"role": "user", "content": user_message})
+
+        # Augment the message stored for the model with integrity signals.
+        # The frontend already rendered the raw text in the user's bubble — those
+        # signals are *only* visible to the model so it can adjust its scoring.
+        augmented = self._with_integrity_note(user_message, integrity)
+        session["messages"].append({"role": "user", "content": augmented})
+        session["integrity_log"] = session.get("integrity_log", [])
+        if integrity:
+            session["integrity_log"].append(integrity)
 
         full_response = ""
         visible_buffer = ""
         plan_started = False
         MARKER = "[PLAN_START]"
 
-        async for chunk in _client.aio.models.generate_content_stream(
+        stream = await _client.aio.models.generate_content_stream(
             model=CHAT_MODEL,
             contents=_to_gemini_contents(session["messages"]),
             config=types.GenerateContentConfig(
@@ -227,7 +245,8 @@ class SkillAssessmentAgent:
                 max_output_tokens=8192,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
-        ):
+        )
+        async for chunk in stream:
             text = chunk.text or ""
             full_response += text
 
@@ -262,6 +281,27 @@ class SkillAssessmentAgent:
                 session["learning_plan"] = plan
                 session["phase"] = "complete"
                 yield {"type": "plan", "content": plan}
+
+    def _with_integrity_note(self, user_message: str, integrity: Optional[dict]) -> str:
+        if not integrity:
+            return user_message
+        notes = []
+        if integrity.get("pasted"):
+            notes.append("answer was pasted from clipboard")
+        if integrity.get("tab_switches", 0) > 0:
+            notes.append(f"tab switched away {integrity['tab_switches']}x while typing")
+        rt = integrity.get("response_time_seconds")
+        chars = integrity.get("char_count", 0)
+        if isinstance(rt, (int, float)):
+            if rt < 8 and chars > 200:
+                notes.append(f"answer typed in {rt:.0f}s — suspiciously fast for {chars} chars")
+            elif rt > 180:
+                notes.append(f"took {rt:.0f}s to answer (deliberation, not necessarily a flag)")
+        if integrity.get("voice_used"):
+            notes.append("answer was dictated via voice")
+        if not notes:
+            return user_message
+        return f"{user_message}\n\n[Integrity: {'; '.join(notes)}]"
 
     async def _extract_info(self, jd_text: str, resume_text: str) -> dict:
         prompt = EXTRACTION_USER_TEMPLATE.format(
