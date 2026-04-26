@@ -33,21 +33,21 @@ Built for [Catalyst Hackathon — Deccan AI](https://deccan.ai)
 │                   FastAPI Backend (Python)                        │
 │                                                                   │
 │  POST /api/start      ← JD text + Resume text                    │
-│    └─ Claude Haiku  ← extract required skills + candidate info   │
-│    └─ Claude Sonnet ← generate initial greeting                  │
+│    └─ Gemini Flash-Lite ← extract required skills + candidate    │
+│    └─ Gemini Flash-Lite ← generate initial greeting              │
 │                                                                   │
 │  POST /api/chat       ← user message                             │
-│    └─ Claude Sonnet  (streaming) ← assessment conversation       │
+│    └─ Gemini Flash-Lite (streaming) ← assessment conversation    │
 │    └─ detects [PLAN_START]…[PLAN_END] → emits `plan` SSE event  │
 │                                                                   │
+│  POST /api/transcribe ← audio → Gemini → transcript text         │
 │  POST /api/upload-pdf ← PDF bytes → pypdf → plain text           │
 └────────────────────┬────────────────────────────────────────────┘
-                     │ Anthropic Python SDK (async)
+                     │ Google GenAI Python SDK (async)
 ┌────────────────────▼────────────────────────────────────────────┐
-│                   Anthropic API                                   │
-│   claude-haiku-4-5   — fast skill/info extraction                │
-│   claude-sonnet-4-6  — conversational assessment + plan gen      │
-│   gemini-2.5-flash-lite — voice transcription (optional)         │
+│                   Google Gemini API                               │
+│   gemini-2.5-flash-lite — extraction, assessment, plan, voice    │
+│   ~1500 free requests/day on the free tier                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,11 +55,11 @@ Built for [Catalyst Hackathon — Deccan AI](https://deccan.ai)
 
 Each required skill is assessed through natural conversation:
 
-- **Extraction phase** (Haiku): Parse JD → required skills with importance levels; parse resume → claimed skills with context.  
-- **Assessment phase** (Sonnet): The agent asks 1 focused question + 1 follow-up per skill. Questions probe real scenarios and practical decisions — not definitions.  
-- **Scoring** (internal, 1–5): `1=Aware` · `2=Beginner` · `3=Intermediate` · `4=Advanced` · `5=Expert`  
-- **Gap threshold**: skills scored ≤ 3 that are marked `critical` or `high` importance feed into the learning plan.  
-- **Adjacent skill mapping**: The plan identifies which skills become easier to acquire once a gap skill is learned, enabling efficient learning order recommendations.  
+- **Extraction phase**: Parse JD → required skills with importance levels; parse resume → claimed skills with context.
+- **Assessment phase**: The agent asks 1 focused question + 1 follow-up per skill. Questions probe real scenarios and practical decisions — not definitions.
+- **Scoring** (internal, 1–5): `1=Aware` · `2=Beginner` · `3=Intermediate` · `4=Advanced` · `5=Expert`
+- **Gap threshold**: skills scored ≤ 3 that are marked `critical` or `high` importance feed into the learning plan.
+- **Adjacent skill mapping**: The plan identifies which skills become easier to acquire once a gap skill is learned, enabling efficient learning order recommendations.
 - **Overall fit %**: Weighted average of skill scores vs. target levels, considering importance weights from the JD.
 
 ---
@@ -68,8 +68,7 @@ Each required skill is assessed through natural conversation:
 
 ### Prerequisites
 - Python 3.11+
-- An [Anthropic API key](https://console.anthropic.com) (Claude Sonnet 4.6 + Haiku 4.5)
-- *Optional:* a free [Gemini API key](https://aistudio.google.com) — only needed if you want voice/audio transcription
+- A free [Gemini API key](https://aistudio.google.com) — get one in 60 seconds, no credit card needed
 
 ### Steps
 
@@ -85,11 +84,10 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Set your API keys
+# 4. Set your API key
 cp .env.example .env
 # Edit .env:
-#   ANTHROPIC_API_KEY=sk-ant-...   (required)
-#   GEMINI_API_KEY=AIza...         (optional — voice transcription only)
+#   GEMINI_API_KEY=AIza...   (required — free at aistudio.google.com)
 
 # 5. Run
 python main.py
@@ -115,7 +113,7 @@ Ready-to-use examples are in the [`samples/`](samples/) directory:
 ```
 IntTeachAgent/
 ├── main.py          # FastAPI app — routes, SSE streaming
-├── agent.py         # Core agent logic (Anthropic async client)
+├── agent.py         # Core agent logic (Google GenAI async client)
 ├── utils.py         # PDF text extraction (pypdf)
 ├── requirements.txt
 ├── .env.example
@@ -134,8 +132,7 @@ IntTeachAgent/
 
 | Layer | Technology |
 |-------|-----------|
-| AI backbone | Claude Sonnet 4.6 (assessment + plan) + Claude Haiku 4.5 (extraction) |
-| Voice transcription | Gemini 2.5 Flash-Lite (optional, audio → text) |
+| AI backbone | Gemini 2.5 Flash-Lite (assessment + extraction + plan + voice) |
 | Backend | FastAPI + uvicorn, Python 3.11 |
 | Streaming | Server-Sent Events (SSE) via `StreamingResponse` |
 | PDF parsing | pypdf |
