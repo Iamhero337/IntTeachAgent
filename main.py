@@ -11,16 +11,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-if not os.environ.get("GEMINI_API_KEY"):
+if not os.environ.get("ANTHROPIC_API_KEY"):
     print(
-        "\n  ERROR: GEMINI_API_KEY is not set.\n"
-        "  Create a .env file (copy .env.example) and add your key from https://aistudio.google.com\n",
+        "\n  ERROR: ANTHROPIC_API_KEY is not set.\n"
+        "  Create a .env file (copy .env.example) and add your key from https://console.anthropic.com\n",
         file=sys.stderr,
     )
     sys.exit(1)
 
 from agent import SkillAssessmentAgent
 from utils import extract_text_from_pdf
+
+# Optional Gemini client — only used for voice transcription
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+_gemini = None
+if GEMINI_KEY:
+    try:
+        from google import genai
+        _gemini = genai.Client(api_key=GEMINI_KEY)
+    except Exception as e:
+        print(f"  WARNING: Could not initialise Gemini client for voice: {e}", file=sys.stderr)
 
 app = FastAPI(title="SkillSense – AI Skill Assessment Agent")
 
@@ -45,6 +55,21 @@ class ChatRequest(BaseModel):
     integrity: dict | None = None
 
 
+def _friendly_error(e: Exception) -> tuple[int, str]:
+    msg = str(e)
+    low = msg.lower()
+    if "429" in msg or "rate" in low or "quota" in low or "resource_exhausted" in low:
+        return 429, (
+            "API rate limit hit. If this is your Anthropic key, you may have run out of credits "
+            "— top up at console.anthropic.com. If the limit clears in a minute, just try again."
+        )
+    if "401" in msg or "invalid api key" in low or "authentication" in low or "permission" in low:
+        return 401, "Invalid or missing API key. Check ANTHROPIC_API_KEY in your environment."
+    if "overloaded" in low or "503" in msg:
+        return 503, "Anthropic is temporarily overloaded. Please retry in a few seconds."
+    return 500, msg
+
+
 @app.get("/")
 async def index():
     return FileResponse("static/index.html")
@@ -54,22 +79,10 @@ async def index():
 async def health():
     return {
         "status": "ok",
-        "api_key_configured": bool(os.environ.get("GEMINI_API_KEY")),
+        "anthropic_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "voice_enabled": _gemini is not None,
         "active_sessions": len(agent.sessions),
     }
-
-
-def _friendly_error(e: Exception) -> tuple[int, str]:
-    msg = str(e)
-    if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
-        return 429, (
-            "The Gemini free tier daily quota has been hit. "
-            "Either wait for the daily reset or enable billing in Google AI Studio "
-            "(very cheap — pennies per assessment)."
-        )
-    if "401" in msg or "API key" in msg.lower() or "permission" in msg.lower():
-        return 401, "Invalid or missing GEMINI_API_KEY. Check your environment variable."
-    return 500, msg
 
 
 @app.post("/api/start")
@@ -77,8 +90,7 @@ async def start_session(request: StartRequest):
     if not request.jd_text.strip() or not request.resume_text.strip():
         raise HTTPException(status_code=400, detail="Both JD and Resume text are required.")
     try:
-        result = await agent.start_session(request.jd_text, request.resume_text)
-        return result
+        return await agent.start_session(request.jd_text, request.resume_text)
     except Exception as e:
         code, friendly = _friendly_error(e)
         raise HTTPException(status_code=code, detail=friendly)
@@ -102,15 +114,19 @@ async def chat_stream(request: ChatRequest):
 
 @app.post("/api/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
+    if _gemini is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Voice transcription is disabled. Set GEMINI_API_KEY to enable it.",
+        )
     try:
         audio_bytes = await audio.read()
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio file")
         from google.genai import types
-        from agent import _client, FAST_MODEL
         mime = audio.content_type or "audio/webm"
-        response = await _client.aio.models.generate_content(
-            model=FAST_MODEL,
+        response = await _gemini.aio.models.generate_content(
+            model="gemini-2.5-flash-lite",
             contents=[
                 types.Part.from_bytes(data=audio_bytes, mime_type=mime),
                 "Transcribe this audio verbatim. Output only the transcript — no preamble, no explanation, no quotes.",
@@ -125,8 +141,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        code, friendly = _friendly_error(e)
-        raise HTTPException(status_code=code, detail=friendly)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
 
 @app.post("/api/upload-pdf")
@@ -159,5 +174,5 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    reload = os.environ.get("RAILWAY_ENVIRONMENT") is None
+    reload = os.environ.get("RAILWAY_ENVIRONMENT") is None and os.environ.get("RENDER") is None
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload)

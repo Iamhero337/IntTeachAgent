@@ -45,8 +45,9 @@ Built for [Catalyst Hackathon — Deccan AI](https://deccan.ai)
                      │ Anthropic Python SDK (async)
 ┌────────────────────▼────────────────────────────────────────────┐
 │                   Anthropic API                                   │
-│   gemini-2.5-flash   — skill/info extraction (thinking off)      │
-│   gemini-2.5-flash   — conversational assessment + plan gen      │
+│   claude-haiku-4-5   — fast skill/info extraction                │
+│   claude-sonnet-4-6  — conversational assessment + plan gen      │
+│   gemini-2.5-flash-lite — voice transcription (optional)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,7 +68,8 @@ Each required skill is assessed through natural conversation:
 
 ### Prerequisites
 - Python 3.11+
-- A free Gemini API key from [aistudio.google.com](https://aistudio.google.com) → **Get API key**
+- An [Anthropic API key](https://console.anthropic.com) (Claude Sonnet 4.6 + Haiku 4.5)
+- *Optional:* a free [Gemini API key](https://aistudio.google.com) — only needed if you want voice/audio transcription
 
 ### Steps
 
@@ -83,9 +85,11 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Set your API key
+# 4. Set your API keys
 cp .env.example .env
-# Edit .env and add: GEMINI_API_KEY=AIza...
+# Edit .env:
+#   ANTHROPIC_API_KEY=sk-ant-...   (required)
+#   GEMINI_API_KEY=AIza...         (optional — voice transcription only)
 
 # 5. Run
 python main.py
@@ -130,7 +134,8 @@ IntTeachAgent/
 
 | Layer | Technology |
 |-------|-----------|
-| AI backbone | Gemini 2.5 Flash — assessment + extraction (Google AI Studio) |
+| AI backbone | Claude Sonnet 4.6 (assessment + plan) + Claude Haiku 4.5 (extraction) |
+| Voice transcription | Gemini 2.5 Flash-Lite (optional, audio → text) |
 | Backend | FastAPI + uvicorn, Python 3.11 |
 | Streaming | Server-Sent Events (SSE) via `StreamingResponse` |
 | PDF parsing | pypdf |

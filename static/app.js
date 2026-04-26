@@ -142,12 +142,28 @@ function updateIntegrityPanel() {
 }
 
 /* ── Voice input (records audio, backend transcribes via Gemini) ───── */
-function initVoiceRecognition() {
+let voiceEnabled = false;
+
+async function initVoiceRecognition() {
   const micBtn = document.getElementById('mic-btn');
   if (!navigator.mediaDevices || !window.MediaRecorder) {
     micBtn.disabled = true;
     micBtn.title = 'Voice input not supported in this browser';
     micBtn.style.opacity = '0.4';
+    return;
+  }
+  /* Check whether backend has voice transcription enabled */
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    voiceEnabled = !!data.voice_enabled;
+    if (!voiceEnabled) {
+      micBtn.disabled = true;
+      micBtn.title = 'Voice input not configured (GEMINI_API_KEY not set on server)';
+      micBtn.style.opacity = '0.35';
+    }
+  } catch {
+    /* Health check failed — leave mic enabled, user will see error on click */
   }
 }
 

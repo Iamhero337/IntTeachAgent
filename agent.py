@@ -4,16 +4,15 @@ import json
 import re
 from typing import AsyncGenerator, Optional
 
-from google import genai
-from google.genai import types
+import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
-FAST_MODEL = "gemini-2.5-flash-lite"
-CHAT_MODEL = "gemini-2.5-flash-lite"
+FAST_MODEL = "claude-haiku-4-5"          # extraction
+CHAT_MODEL = "claude-sonnet-4-6"         # assessment + plan generation
 
 EXTRACTION_SYSTEM = (
     "You are a document analyzer. Extract structured data from job descriptions and resumes. "
@@ -131,17 +130,6 @@ Thank you, {candidate_name}! I've completed the assessment. Here's what I found:
 [PLAN_END]"""
 
 
-def _to_gemini_contents(messages: list[dict]) -> list[dict]:
-    """Convert Anthropic-style messages to Gemini contents format."""
-    return [
-        {
-            "role": "model" if m["role"] == "assistant" else "user",
-            "parts": [{"text": m["content"]}],
-        }
-        for m in messages
-    ]
-
-
 class SkillAssessmentAgent:
     def __init__(self) -> None:
         self.sessions: dict = {}
@@ -175,17 +163,13 @@ class SkillAssessmentAgent:
             candidate_skills_str=candidate_skills_str,
         )
 
-        init_messages = [{"role": "user", "content": "Please begin the assessment."}]
-        init_response = await _client.aio.models.generate_content(
+        init_response = await _client.messages.create(
             model=CHAT_MODEL,
-            contents=_to_gemini_contents(init_messages),
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=8192,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+            max_tokens=600,
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Please begin the assessment."}],
         )
-        initial_message = init_response.text
+        initial_message = init_response.content[0].text
 
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {
@@ -223,9 +207,6 @@ class SkillAssessmentAgent:
 
         session = self.sessions[session_id]
 
-        # Augment the message stored for the model with integrity signals.
-        # The frontend already rendered the raw text in the user's bubble — those
-        # signals are *only* visible to the model so it can adjust its scoring.
         augmented = self._with_integrity_note(user_message, integrity)
         session["messages"].append({"role": "user", "content": augmented})
         session["integrity_log"] = session.get("integrity_log", [])
@@ -237,38 +218,34 @@ class SkillAssessmentAgent:
         plan_started = False
         MARKER = "[PLAN_START]"
 
-        stream = await _client.aio.models.generate_content_stream(
+        async with _client.messages.stream(
             model=CHAT_MODEL,
-            contents=_to_gemini_contents(session["messages"]),
-            config=types.GenerateContentConfig(
-                system_instruction=session["system_prompt"],
-                max_output_tokens=8192,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        async for chunk in stream:
-            text = chunk.text or ""
-            full_response += text
+            max_tokens=2048,
+            system=session["system_prompt"],
+            messages=session["messages"],
+        ) as stream:
+            async for text in stream.text_stream:
+                full_response += text
 
-            if plan_started:
-                continue
+                if plan_started:
+                    continue
 
-            visible_buffer += text
+                visible_buffer += text
 
-            if MARKER in visible_buffer:
-                idx = visible_buffer.index(MARKER)
-                pre = visible_buffer[:idx].rstrip()
-                if pre:
-                    yield {"type": "text", "content": pre}
-                plan_started = True
-                visible_buffer = ""
-                yield {"type": "generating_plan"}
-                continue
+                if MARKER in visible_buffer:
+                    idx = visible_buffer.index(MARKER)
+                    pre = visible_buffer[:idx].rstrip()
+                    if pre:
+                        yield {"type": "text", "content": pre}
+                    plan_started = True
+                    visible_buffer = ""
+                    yield {"type": "generating_plan"}
+                    continue
 
-            if len(visible_buffer) > len(MARKER):
-                emit = visible_buffer[: -len(MARKER)]
-                visible_buffer = visible_buffer[-len(MARKER):]
-                yield {"type": "text", "content": emit}
+                if len(visible_buffer) > len(MARKER):
+                    emit = visible_buffer[: -len(MARKER)]
+                    visible_buffer = visible_buffer[-len(MARKER):]
+                    yield {"type": "text", "content": emit}
 
         if not plan_started and visible_buffer:
             yield {"type": "text", "content": visible_buffer}
@@ -307,17 +284,13 @@ class SkillAssessmentAgent:
         prompt = EXTRACTION_USER_TEMPLATE.format(
             jd_text=jd_text[:4000], resume_text=resume_text[:4000]
         )
-        response = await _client.aio.models.generate_content(
+        response = await _client.messages.create(
             model=FAST_MODEL,
-            contents=[{"role": "user", "parts": [{"text": prompt}]}],
-            config=types.GenerateContentConfig(
-                system_instruction=EXTRACTION_SYSTEM,
-                max_output_tokens=8192,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+            max_tokens=1500,
+            system=EXTRACTION_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
         )
-        raw = (response.text or "").strip()
-        # Robustly extract the JSON object regardless of surrounding text/fences
+        raw = (response.content[0].text or "").strip()
         start, end = raw.find("{"), raw.rfind("}")
         if start != -1 and end != -1:
             raw = raw[start : end + 1]
