@@ -9,5 +9,6 @@ dist/
 build/
 .pytest_cache/
 
-# Personal presentation notes — do not share
+# Personal notes — do not share
 PRESENTATION.md
+WRITEUP.md
