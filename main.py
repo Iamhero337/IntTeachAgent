@@ -11,10 +11,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-if not os.environ.get("ANTHROPIC_API_KEY"):
+if not os.environ.get("GEMINI_API_KEY"):
     print(
-        "\n  ERROR: ANTHROPIC_API_KEY is not set.\n"
-        "  Create a .env file (copy .env.example) and add your key from https://console.anthropic.com\n",
+        "\n  ERROR: GEMINI_API_KEY is not set.\n"
+        "  Create a .env file (copy .env.example) and add your key from https://aistudio.google.com\n",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -22,15 +22,14 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
 from agent import SkillAssessmentAgent
 from utils import extract_text_from_pdf
 
-# Optional Gemini client — only used for voice transcription
+# Gemini client reused for voice transcription
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 _gemini = None
-if GEMINI_KEY:
-    try:
-        from google import genai
-        _gemini = genai.Client(api_key=GEMINI_KEY)
-    except Exception as e:
-        print(f"  WARNING: Could not initialise Gemini client for voice: {e}", file=sys.stderr)
+try:
+    from google import genai as _genai
+    _gemini = _genai.Client(api_key=GEMINI_KEY)
+except Exception as e:
+    print(f"  WARNING: Could not initialise Gemini client for voice: {e}", file=sys.stderr)
 
 app = FastAPI(title="SkillSense – AI Skill Assessment Agent")
 
@@ -79,7 +78,7 @@ async def index():
 async def health():
     return {
         "status": "ok",
-        "anthropic_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
         "voice_enabled": _gemini is not None,
         "active_sessions": len(agent.sessions),
     }
@@ -115,10 +114,7 @@ async def chat_stream(request: ChatRequest):
 @app.post("/api/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
     if _gemini is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Voice transcription is disabled. Set GEMINI_API_KEY to enable it.",
-        )
+        raise HTTPException(status_code=503, detail="Voice transcription unavailable.")
     try:
         audio_bytes = await audio.read()
         if not audio_bytes:

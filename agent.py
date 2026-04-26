@@ -4,15 +4,15 @@ import json
 import re
 from typing import AsyncGenerator, Optional
 
-import anthropic
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
-FAST_MODEL = "claude-haiku-4-5"          # extraction
-CHAT_MODEL = "claude-sonnet-4-6"         # assessment + plan generation
+MODEL = "gemini-2.5-flash-lite"   # ~1500 req/day on free tier
 
 EXTRACTION_SYSTEM = (
     "You are a document analyzer. Extract structured data from job descriptions and resumes. "
@@ -130,6 +130,15 @@ Thank you, {candidate_name}! I've completed the assessment. Here's what I found:
 [PLAN_END]"""
 
 
+def _to_gemini_messages(messages: list[dict]) -> list[types.Content]:
+    """Convert OpenAI-style messages to Gemini Content list."""
+    result = []
+    for m in messages:
+        role = "model" if m["role"] == "assistant" else "user"
+        result.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
+    return result
+
+
 class SkillAssessmentAgent:
     def __init__(self) -> None:
         self.sessions: dict = {}
@@ -163,13 +172,16 @@ class SkillAssessmentAgent:
             candidate_skills_str=candidate_skills_str,
         )
 
-        init_response = await _client.messages.create(
-            model=CHAT_MODEL,
-            max_tokens=600,
-            system=system_prompt,
-            messages=[{"role": "user", "content": "Please begin the assessment."}],
+        init_response = await _client.aio.models.generate_content(
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text="Please begin the assessment.")])],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=600,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        initial_message = init_response.content[0].text
+        initial_message = (init_response.text or "").strip()
 
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {
@@ -218,34 +230,42 @@ class SkillAssessmentAgent:
         plan_started = False
         MARKER = "[PLAN_START]"
 
-        async with _client.messages.stream(
-            model=CHAT_MODEL,
-            max_tokens=2048,
-            system=session["system_prompt"],
-            messages=session["messages"],
-        ) as stream:
-            async for text in stream.text_stream:
-                full_response += text
+        stream = await _client.aio.models.generate_content_stream(
+            model=MODEL,
+            contents=_to_gemini_messages(session["messages"]),
+            config=types.GenerateContentConfig(
+                system_instruction=session["system_prompt"],
+                max_output_tokens=4096,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
 
-                if plan_started:
-                    continue
+        async for chunk in stream:
+            text = chunk.text or ""
+            if not text:
+                continue
 
-                visible_buffer += text
+            full_response += text
 
-                if MARKER in visible_buffer:
-                    idx = visible_buffer.index(MARKER)
-                    pre = visible_buffer[:idx].rstrip()
-                    if pre:
-                        yield {"type": "text", "content": pre}
-                    plan_started = True
-                    visible_buffer = ""
-                    yield {"type": "generating_plan"}
-                    continue
+            if plan_started:
+                continue
 
-                if len(visible_buffer) > len(MARKER):
-                    emit = visible_buffer[: -len(MARKER)]
-                    visible_buffer = visible_buffer[-len(MARKER):]
-                    yield {"type": "text", "content": emit}
+            visible_buffer += text
+
+            if MARKER in visible_buffer:
+                idx = visible_buffer.index(MARKER)
+                pre = visible_buffer[:idx].rstrip()
+                if pre:
+                    yield {"type": "text", "content": pre}
+                plan_started = True
+                visible_buffer = ""
+                yield {"type": "generating_plan"}
+                continue
+
+            if len(visible_buffer) > len(MARKER):
+                emit = visible_buffer[: -len(MARKER)]
+                visible_buffer = visible_buffer[-len(MARKER):]
+                yield {"type": "text", "content": emit}
 
         if not plan_started and visible_buffer:
             yield {"type": "text", "content": visible_buffer}
@@ -284,13 +304,16 @@ class SkillAssessmentAgent:
         prompt = EXTRACTION_USER_TEMPLATE.format(
             jd_text=jd_text[:4000], resume_text=resume_text[:4000]
         )
-        response = await _client.messages.create(
-            model=FAST_MODEL,
-            max_tokens=1500,
-            system=EXTRACTION_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
+        response = await _client.aio.models.generate_content(
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM,
+                max_output_tokens=1500,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        raw = (response.content[0].text or "").strip()
+        raw = (response.text or "").strip()
         start, end = raw.find("{"), raw.rfind("}")
         if start != -1 and end != -1:
             raw = raw[start : end + 1]
